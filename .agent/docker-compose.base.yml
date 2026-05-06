@@ -1,0 +1,155 @@
+# ============================================
+# Laravel Docker Compose Template
+# Production-ready Laravel + MySQL + Redis
+# ============================================
+version: "3.9"
+
+name: "${PROJECT_NAME:-laravel-app}"
+
+services:
+  # ============================================
+  # Laravel Application Service
+  # ============================================
+  app:
+    build:
+      context: ./
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    container_name: "${PROJECT_NAME}-app"
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - /app/vendor  # Prevent composer conflicts
+      - /app/storage  # Prevent storage conflicts
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      - APP_NAME=${APP_NAME:-Laravel}
+      - APP_ENV=${APP_ENV:-local}
+      - APP_DEBUG=${APP_DEBUG:-true}
+      - APP_URL=${APP_URL:-http://localhost:8000}
+      - LOG_CHANNEL=${LOG_CHANNEL:-stack}
+      - DB_CONNECTION=mysql
+      - DB_HOST=${DB_HOST:-db}
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE:-laravel}
+      - DB_USERNAME=${DB_USERNAME:-laravel}
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-null}
+      - REDIS_PORT=6379
+      - CACHE_DRIVER=redis
+      - SESSION_DRIVER=redis
+      - QUEUE_CONNECTION=redis
+      - MAIL_DRIVER=${MAIL_DRIVER:-smtp}
+      - MAIL_HOST=mailhog
+      - MAIL_PORT=1025
+      - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS:-hello@example.com}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      timeout: 10s
+      retries: 3
+      interval: 30s
+      start_period: 30s
+
+  # ============================================
+  # MySQL Database
+  # ============================================
+  db:
+    image: "${MYSQL_IMAGE:-mysql:8.0}"
+    container_name: "${PROJECT_NAME}-db"
+    restart: unless-stopped
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-laravel}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+      MYSQL_USER: ${DB_USERNAME:-laravel}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
+    volumes:
+      - db_data:/var/lib/mysql
+      - ${MYSQL_CONFIG_DIR:-./.docker/mysql}:/etc/mysql/conf.d
+      - ${MYSQL_INIT_DIR:-./.docker/mysql/init}:/docker-entrypoint-initdb.d
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 5
+      interval: 10s
+
+  # ============================================
+  # Cache & Queue Services
+  # ============================================
+
+  redis:
+    image: "${REDIS_IMAGE:-redis:7.0-alpine}"
+    container_name: "${PROJECT_NAME:-app}-redis"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 10s
+      retries: 5
+
+  # ============================================
+  # Mailhog - Email Testing
+  # ============================================
+  mailhog:
+    image: "${MAILHOG_IMAGE:-mailhog/mailhog:latest}"
+    container_name: "${PROJECT_NAME}-mailhog"
+    restart: unless-stopped
+    ports:
+      - "${MAILHOG_SMTP_PORT:-1025}:1025"
+      - "${MAILHOG_UI_PORT:-8025}:8080"
+    networks:
+      - app-network
+
+  # ============================================
+  # Database Admin - Adminer
+  # ============================================
+  adminer:
+    image: "${ADMINER_IMAGE:-adminer:4.8.1}"
+    container_name: "${PROJECT_NAME}-adminer"
+    restart: unless-stopped
+    ports:
+      - "${ADMINER_PORT:-8888}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  db_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${NETWORK_SUBNET:-172.20.0.0/16}
